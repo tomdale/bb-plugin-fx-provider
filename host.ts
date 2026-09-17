@@ -75,6 +75,12 @@ export const experimental_providerBridge = {
               spec.data.command,
               ...spec.data.args,
             ],
+            env: {
+              ...spec.data.env,
+              ...(process.env.ELECTRON_RUN_AS_NODE && {
+                ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE,
+              }),
+            },
           };
           line = JSON.stringify(message);
         }
