@@ -1,0 +1,16 @@
+{
+  "kind": "status",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "update_channel": "stable",
+  "build_channel": "stable",
+  "build_revision": "",
+  "auth": "fx login",
+  "auth_refreshable": true,
+  "team": "example-team",
+  "permission_mode": "ask",
+  "workspace": "/tmp/fx",
+  "history_turns": 0,
+  "session_permission_grants": 0,
+  "agent_step_limit": 0,
+  "ultrafast_requested": false
+}

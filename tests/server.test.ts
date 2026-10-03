@@ -30,8 +30,7 @@ function register() {
 function registeredLaunchSpec(): Record<string, unknown> {
   const [registration] = register();
   const options = registration?.experimental_bridgeOptions as
-    | { acpLaunchSpec?: Record<string, unknown> }
-    | undefined;
+    { acpLaunchSpec?: Record<string, unknown> } | undefined;
   expect(options?.acpLaunchSpec).toBeDefined();
   return options!.acpLaunchSpec!;
 }
@@ -70,8 +69,18 @@ describe("fx provider registration", () => {
       supportsThreadArchive: false,
       supportsThreadRename: false,
       permissionModes: ["accept-edits", "full"],
-      reasoningLevels: ["medium"],
+      reasoningLevels: ["none", "low", "medium", "high", "xhigh", "max"],
     });
+  });
+
+  it("labels exactly the reasoning ladder BB validates thread levels against", () => {
+    // BB rejects a level outside `capabilities.reasoningLevels`, so the ladder
+    // must include every level an fx effort maps to; the picker labels them.
+    const [registration] = register();
+
+    expect(registration?.reasoningLevels?.map((level) => level.id)).toEqual(
+      registration?.capabilities.reasoningLevels,
+    );
   });
 
   it("probes models once per host and answers only the health request", () => {
@@ -85,10 +94,10 @@ describe("fx provider registration", () => {
     });
   });
 
-  it("leaves model discovery to the agent rather than to `fx models`", () => {
-    // `fx models --json` omits models the account can still select, so the
-    // launch spec deliberately carries no `modelCli` and the bridge reads the
-    // catalog from the agent's own session config options.
+  it("leaves model listing and effort hints out of the launch spec", () => {
+    // host.ts answers `model/list` itself from fx's JSON commands, and fx
+    // offers efforts as an ACP option, so the shared bridge needs neither the
+    // text-based model CLI nor launch-time reasoning hints.
     const launchSpec = (
       fxProviderDeclaration.experimental_bridgeOptions as {
         acpLaunchSpec: Record<string, unknown>;

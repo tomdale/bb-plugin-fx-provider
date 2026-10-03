@@ -45,10 +45,38 @@ responses and updates. The adapter also translates fx's `refused` stop reason
 to ACP's `refusal`, retaining the agent's rejection text. The plugin ships no
 frontend bundle.
 
-Models come from ACP session configuration. Earlier fx CLI versions omitted
-selectable account defaults from `fx models --json`, so the launch spec leaves
-out `modelCli` and lets the bridge query the agent. The bridge applies model
-selection through ACP. The catalog is cached per host.
+### Models and reasoning effort
+
+`host.ts` answers BB's model-list request itself. For a Vercel AI Gateway
+account it runs `fx models --json` (the ids the account can select) and
+`fx status --json` (the configured model and sign-in state) with the launch
+spec's command and environment, and reads the public Gateway catalog
+(`https://ai-gateway.vercel.sh/v1/models`, or fx's loopback
+`FX_GATEWAY_BASE_URL`) at the same time. No fx session is created. The catalog
+is cached in memory for ten minutes, and its last good copy is reused while the
+Gateway is unreachable. BB itself refreshes the list every ten minutes per
+machine.
+
+Each model gets its Gateway name, its vendor as the picker's qualifier, a short
+description (context window and capabilities), and the efforts fx offers for
+it: the values of the first `effort` entry in the model's `reasoning_options`,
+read as fx reads them and mapped onto BB's levels (`minimal` becomes Low). A
+model starts at Medium when it offers it, else High, else its lowest level that
+still reasons. fx's configured model is the default. The bridge applies the
+selected model and effort through fx's ACP options; choosing an effort needs
+an fx that offers efforts over ACP (0.0.9 or later).
+
+The picker lists the default model first, then the featured models: for each
+vendor in `FEATURED_VENDORS` (`src/model-list.ts`), the newest model of each
+of its newest families, leaving out fast twins and small, beta, or open-weight
+variants. Every other model the account can select is under **More models**.
+
+When fx is not signed in, BB shows fx's own sign-in help; when fx is not
+installed, BB reports the CLI as missing. For other fx providers (Codex or Grok
+subscriptions, configured providers), or when the catalog cannot describe the
+account's models, discovery falls back to the shared bridge's ACP probe, which
+opens an fx session and switches it through every model. Each such refresh
+leaves one empty fx session behind.
 
 ### Permissions
 
@@ -67,17 +95,8 @@ its own and adds no telemetry.
 
 The provider supports session restore but does not advertise forks, manual
 compaction, provider-side archive/rename, service tiers, or native user-question
-UI. Reasoning controls appear only when the selected model exposes effort
-choices over ACP. Released fx 0.0.7 and 0.0.8 do not expose these; upstream
-[added model-specific ACP effort support](https://github.com/vercel-labs/fx/commit/32f3dc9ee07b9649ce10d6b24d1e30af0e20302a)
-after those releases. fx can still use its own saved effort preference.
-
-The required static `medium` capability is BB bookkeeping. Model discovery
-runs the shared bridge in a short-lived subprocess and removes its synthetic
-“agent-managed Medium” choice from the resulting catalog, including models
-left unprobed at the discovery deadline. Actual effort choices, including a
-real medium-only control, are preserved. When fx exposes no effort selector,
-the shared bridge sends no effort value and fx keeps its own preference.
+UI. A model without effort options offers no reasoning control, and fx keeps
+its own effort for it.
 
 Registration uses the supported `bb.providers.register` API. The shared bridge
 export and static launch options still use the SDK's published experimental
@@ -102,6 +121,11 @@ GitHub Actions runs the same checks on pull requests and pushes to `main`.
   restore and streaming), model discovery, and permission allow/deny/full
   behavior, plus fx's refusal response. It also rejects any launch that loses `FX_PERMISSION_MODE=ask`.
   These tests need no account and do not claim to test the real fx CLI.
+- Model-discovery tests run the built bridge against a fake fx CLI
+  (`tests/fixtures/fake-fx.mjs`) and a local stand-in for the Gateway catalog:
+  the Gateway listing, sign-in and missing-CLI errors, the ACP fallback, and
+  each listed effort reaching fx when a thread starts. Catalog fixtures are
+  real Gateway entries.
 - `check:managed` builds a temporary copy with `npm install --omit=dev`, checks
   its server/host artifacts, and imports the host export. This catches missing
   production dependencies that a developer build would conceal.

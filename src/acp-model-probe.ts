@@ -1,25 +1,53 @@
+/**
+ * Model discovery over ACP, for fx providers the Gateway catalog does not
+ * describe (Codex and Grok subscriptions, configured providers). The shared
+ * bridge discovers models by opening an fx session and switching it through
+ * every model, so each probe leaves one persisted, empty fx session behind;
+ * fx offers no ephemeral discovery session to avoid that.
+ */
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { defaultReasoningEffort } from "./gateway-catalog.js";
 
-/** Remove only the shared bridge's synthetic ACP fallback, including on
- * models left unprobed when its discovery deadline expires. A genuine
- * medium-only control has its own fx description and must be preserved.
+/** The shared bridge's stand-in effort for a model that names none. */
+const SYNTHETIC_EFFORT_DESCRIPTION =
+  "Reasoning effort is managed by the connected ACP agent.";
+
+/**
+ * Correct the catalog the shared bridge discovered over ACP:
+ *
+ * - Remove its synthetic medium choice, which it gives models that offer no
+ *   effort option and models left unprobed at its discovery deadline. A real
+ *   medium-only option carries fx's own description and is kept.
+ * - Default each model's effort by {@link defaultReasoningEffort}. The bridge
+ *   would start at fx's current effort, which fx reports as `auto`; that
+ *   names no level, so the bridge would fall back to the lowest one.
  */
-export function normalizeFxModelCatalog(result: unknown): unknown {
+export function normalizeProbedModelCatalog(result: unknown): unknown {
   if (result === null || typeof result !== "object") return result;
   const catalog = result as Record<string, unknown>;
+  const normalizeModel = (model: Record<string, unknown>) => {
+    const listed = model.supportedReasoningEfforts;
+    if (!Array.isArray(listed)) return model;
+    const efforts =
+      listed.length === 1 &&
+      listed[0]?.reasoningEffort === "medium" &&
+      listed[0]?.description === SYNTHETIC_EFFORT_DESCRIPTION
+        ? []
+        : listed;
+    return {
+      ...model,
+      supportedReasoningEfforts: efforts,
+      defaultReasoningEffort: defaultReasoningEffort(efforts),
+    };
+  };
   const normalize = (models: unknown) =>
     Array.isArray(models)
-      ? models.map((model) => {
-          const efforts = model?.supportedReasoningEfforts;
-          return Array.isArray(efforts) &&
-            efforts.length === 1 &&
-            efforts[0]?.reasoningEffort === "medium" &&
-            efforts[0]?.description ===
-              "Reasoning effort is managed by the connected ACP agent."
-            ? { ...model, supportedReasoningEfforts: [] }
-            : model;
-        })
+      ? models.map((model) =>
+          model !== null && typeof model === "object"
+            ? normalizeModel(model as Record<string, unknown>)
+            : model,
+        )
       : models;
   return {
     ...catalog,
@@ -32,10 +60,16 @@ export function normalizeFxModelCatalog(result: unknown): unknown {
   };
 }
 
-/** Model probes are isolated subprocesses; normal thread traffic uses the
- * shared bridge directly. Importing the host artifact starts no processes.
+/**
+ * Runs one `model/list` request through the shared bridge in a subprocess of
+ * this host artifact (started with `flag`) and writes the normalized answer
+ * to stdout. The subprocess owns its stdout, so its answer can be corrected
+ * without patching SDK internals or touching the main bridge's session and
+ * approval traffic, and its process group (the probe, the ACP adapter and
+ * `fx acp`) can be killed whole. Importing the host artifact starts no
+ * processes.
  */
-export function createFxModelCatalogProxy(modulePath: string, flag: string) {
+export function createAcpModelProbe(modulePath: string, flag: string) {
   const send = (message: unknown) =>
     process.stdout.write(`${JSON.stringify(message)}\n`);
   const cleanups = new Set<() => void>();
@@ -96,7 +130,10 @@ export function createFxModelCatalogProxy(modulePath: string, flag: string) {
         settled = true;
         send(
           "result" in response
-            ? { ...response, result: normalizeFxModelCatalog(response.result) }
+            ? {
+                ...response,
+                result: normalizeProbedModelCatalog(response.result),
+              }
             : response,
         );
         cleanup();

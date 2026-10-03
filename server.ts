@@ -2,6 +2,7 @@ import type {
   BbPluginApi,
   PluginProviderDeclaration,
 } from "@get-bb/plugin-sdk";
+import { FX_REASONING_LEVELS } from "./src/gateway-catalog.js";
 
 /**
  * Pin ask mode so fx forwards unresolved permission requests to BB even when
@@ -16,14 +17,13 @@ const FX_ENV = { FX_PERMISSION_MODE: "ask" } as const;
  * declares the launch and lets that bridge do the talking. host.ts normalizes
  * the order of fx's model config options before the shared bridge reads them.
  *
- * No `modelCli`: fx's own `fx models --json` omits models the account can
- * still select (the account default among them), while `session/new` returns
- * every one of them as a `model` config option. Leaving the model CLI out
- * makes the bridge discover models from the agent itself, which is the
- * complete list.
+ * No `modelCli`: host.ts answers `model/list` itself, from `fx models --json`,
+ * `fx status --json` and the public Gateway catalog, run with this command
+ * and environment. The shared bridge's model-list parser reads text lines,
+ * not fx's JSON.
  *
- * No `reasoningCli` / `nativeReasoning`: fx 0.0.7 session configuration
- * reports `provider`, `model` and `mode`, with no reasoning option.
+ * No `reasoningCli` / `nativeReasoning`: fx offers each model's efforts as an
+ * ACP `thought_level` option, which the shared bridge applies directly.
  *
  * No `permissionCli`: fx takes its permission mode from the environment, not
  * from a command-line flag, so the mode is pinned in `env` above.
@@ -76,10 +76,18 @@ export const fxProviderDeclaration: PluginProviderDeclaration = {
     supportsThreadArchive: false,
     supportsThreadRename: false,
     permissionModes: ["accept-edits", "full"],
-    // Required static fallback only. The model catalog exposes effort choices
-    // only when fx advertises them; catalog normalization removes invented choices.
-    reasoningLevels: ["medium"],
+    // Every level an fx effort value maps to. BB accepts a thread's level
+    // only from this ladder; each model's own subset comes from `model/list`.
+    reasoningLevels: [...FX_REASONING_LEVELS],
   },
+  reasoningLevels: [
+    { id: "none", label: "None" },
+    { id: "low", label: "Low" },
+    { id: "medium", label: "Medium" },
+    { id: "high", label: "High" },
+    { id: "xhigh", label: "Extra High" },
+    { id: "max", label: "Max" },
+  ],
   composerActions: [],
 };
 

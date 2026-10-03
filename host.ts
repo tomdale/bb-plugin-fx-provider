@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
-import { createFxModelCatalogProxy } from "./src/model-catalog.js";
+import { createFxModelDiscovery } from "./src/model-discovery.js";
 import {
   experimental_acpLaunchSpecSchema,
   experimental_acpProviderBridge,
@@ -12,7 +12,7 @@ const modulePath = fileURLToPath(import.meta.url);
 const modelCatalogFlag = "--fx-model-catalog";
 const modelCatalogMode =
   process.argv[1] === modulePath && process.argv[2] === modelCatalogFlag;
-const modelCatalog = createFxModelCatalogProxy(modulePath, modelCatalogFlag);
+const modelCatalog = createFxModelDiscovery(modulePath, modelCatalogFlag);
 
 // BB normally imports this artifact. Only a direct invocation by the shared
 // bridge starts the adapter, using the same self-contained artifact on each host.
@@ -33,7 +33,8 @@ function closeBridge(): void {
 export const experimental_providerBridge = {
   ...experimental_acpProviderBridge,
   // The SDK bootstrap only hooks signals declared by the entry. Signals and
-  // stdin closure must all release detached model probes before the SDK exits.
+  // stdin closure must all release detached fx queries and model probes
+  // before the SDK exits.
   onClose: closeBridge,
   onSigterm: closeBridge,
   onSigint: closeBridge,
@@ -92,9 +93,11 @@ export const experimental_providerBridge = {
   },
 };
 
-// A short-lived model probe uses the same shared bridge and ACP adapter. Its
-// stdout is isolated so catalog metadata can be normalized without patching
-// SDK internals or intercepting the main bridge's session/approval traffic.
+// The ACP model probe (model discovery for fx providers other than the
+// Gateway) is a short-lived run of this artifact. It uses the same shared
+// bridge and ACP adapter; its stdout is isolated so catalog metadata can be
+// normalized without patching SDK internals or intercepting the main bridge's
+// session/approval traffic.
 if (modelCatalogMode) {
   createInterface({ input: process.stdin })
     .on("line", (line) => experimental_providerBridge.handleLine(line))
