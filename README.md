@@ -38,12 +38,25 @@ Its SVG mark follows the theme through BB's built-in provider icon rendering.
 
 `server.ts` registers the provider through `bb.providers.register` and declares
 how to launch `fx acp`. `host.ts` uses the SDK's shared ACP bridge for sessions,
-streaming, and approvals. A small child-process adapter puts fx's actual `model` config option
-before its `provider` option: fx 0.0.7 marks both as category `model`, while the
-shared bridge selects the first. It preserves the options and their values in
-responses and updates. The adapter also translates fx's `refused` stop reason
-to ACP's `refusal`, retaining the agent's rejection text. The plugin ships no
-frontend bundle.
+streaming, and approvals, and runs fx behind a small child-process adapter that
+adjusts fx's ACP traffic before the bridge reads it:
+
+- It puts fx's actual `model` config option before its `provider` option: fx
+  marks both as category `model`, while the shared bridge selects the first.
+  Options and their values are otherwise preserved.
+- It translates fx's stop reasons `refused`, `max_output_tokens`, and
+  `max_model_turns` to ACP's `refusal`, `max_tokens`, and `max_turn_requests`,
+  retaining the agent's text.
+- It answers the permission requests BB's policy already decides (see
+  [Permissions](#permissions)).
+- It keeps fx's operational text out of the reply. fx sends its notices as
+  message text under a message id of their own, and the shared bridge would
+  stream them into the reply. fx's context notices (the skill discovery
+  warning and `[context]` budget notices) are sent on as reasoning instead,
+  and any other text that starts a new message id within the same reply, such
+  as an HTTP error or a restart marker, starts a new paragraph.
+
+The plugin ships no frontend bundle.
 
 ### Models and reasoning effort
 
@@ -81,10 +94,36 @@ leaves one empty fx session behind.
 ### Permissions
 
 The launch spec pins `FX_PERMISSION_MODE=ask`, overriding an inherited `auto`
-or `yolo` mode. The bridge sends fx's `session/request_permission` requests to
-BB in `accept-edits` mode and allows them in `full` mode. BB's escalation policy
-still applies. This is not a filesystem sandbox: fx's own configured rules,
-session grants, and tool admission can decide a call before fx asks BB.
+or `yolo` mode, so fx sends a `session/request_permission` request for each
+sensitive tool call. The requests are decided as follows:
+
+- **Workspace edits.** The adapter approves fx `write_file` and `edit_file`
+  calls whose target lies inside the thread's workspace or BB's additional
+  write roots (for a worktree, the git directories its commits write to; BB's
+  thread storage). Relative paths resolve against the workspace and symlinks are
+  followed, as fx does. BB's permission modes all approve such edits, so the
+  adapter approves them in every mode. An edit outside the roots, a path the
+  adapter cannot resolve with certainty (`..` segments, `~`, a dangling
+  symlink), and edits of any other shape go to the bridge.
+- **BB's own tools.** The adapter approves calls to the tools BB serves to fx
+  through the bridge's MCP server, in every mode; BB authorizes those itself.
+- **Everything else**, including shell commands (fx deletes and moves files
+  with commands), goes to the bridge, which allows it in `full` mode and
+  otherwise sends it to BB to ask the user, applying BB's escalation policy.
+
+The adapter answers only while a prompt is running and has not been
+cancelled, and always with fx's allow-once option, so it creates no fx session
+grant. host.ts recomputes the adapter's grant for every turn; a turn whose
+policy grants different write roots runs in a rebuilt session.
+
+The shared bridge decides the remaining requests with the permission mode the
+session was started with. Switching a running thread between `accept-edits`
+and `full` takes effect for commands and other edits only when the session
+next starts: after BB releases the idle session (30 minutes) or restarts the
+bridge.
+
+This is not a filesystem sandbox: fx's own configured rules, session grants,
+and tool admission can decide a call before fx asks BB.
 
 The plugin does not set fx's `mode` session option. It passes model selection
 and any advertised reasoning-effort choices through the bridge. The fx CLI
@@ -120,7 +159,10 @@ GitHub Actions runs the same checks on pull requests and pushes to `main`.
   bootstrap. A local ACP fixture exercises canonical conformance (including
   restore and streaming), model discovery, and permission allow/deny/full
   behavior, plus fx's refusal response. It also rejects any launch that loses `FX_PERMISSION_MODE=ask`.
-  These tests need no account and do not claim to test the real fx CLI.
+  `tests/approvals.bridge.test.ts` drives the same fixture through fx-shaped
+  edit, command, and MCP tool permission requests and fx's notices, in
+  `accept-edits` and `full` mode. These tests need no account and do not claim
+  to test the real fx CLI.
 - Model-discovery tests run the built bridge against a fake fx CLI
   (`tests/fixtures/fake-fx.mjs`) and a local stand-in for the Gateway catalog:
   the Gateway listing, sign-in and missing-CLI errors, the ACP fallback, and

@@ -8,22 +8,32 @@
  *
  * - A message id change within one open assistant item starts a new
  *   paragraph, so whatever fx interjects stays visible and readable.
- * - fx's skill discovery warning, a diagnostic it repeats at the start of
- *   every session, is re-sent as an `agent_thought_chunk`. fx does not tag
- *   operational text, so this one notice is recognized by the exact frame fx
- *   writes around it, and only as the complete first chunk of a message.
- *   Later chunks under the same id are other notices, such as an HTTP error,
- *   and stay in the reply.
+ * - fx's context notices are re-sent as `agent_thought_chunk`s: the skill
+ *   discovery warning it repeats at the start of every session, and the
+ *   `[context]` lines that report context-budget truncation (for example of
+ *   a long MCP tool description). fx does not tag operational text, so these
+ *   are recognized by the exact frames fx writes, and only as a complete
+ *   chunk that would start a new message in the reply. fx keeps one id
+ *   across consecutive notices, so each chunk is judged on its own: an HTTP
+ *   error that follows a context notice stays in the reply.
  */
 
 const SKILL_WARNING_PREFIX = "skill discovery warning: ";
 const SKILL_WARNING_ENDING =
   /; (?:relaunch with FX_TRACE=1 to write a trace log|see ".*" for details)\s*$/s;
+/** fx marks every line of a context-budget notice with `[context] `. */
+const CONTEXT_LINE = /^\[context\] \S/;
 
-/** Whether a message's first chunk is fx's complete skill discovery warning. */
-export function isFxSkillWarning(text: string): boolean {
+/** Whether a chunk is one of fx's complete context notices. */
+export function isFxContextNotice(text: string): boolean {
+  if (text.startsWith(SKILL_WARNING_PREFIX)) {
+    return SKILL_WARNING_ENDING.test(text);
+  }
+  // A bare `[context]` line is an empty line within a notice.
+  const lines = text.replace(/\n+$/, "").split("\n");
   return (
-    text.startsWith(SKILL_WARNING_PREFIX) && SKILL_WARNING_ENDING.test(text)
+    lines.some((line) => CONTEXT_LINE.test(line)) &&
+    lines.every((line) => line === "[context]" || CONTEXT_LINE.test(line))
   );
 }
 
@@ -95,7 +105,7 @@ export class FxTranscript {
     if (text === undefined) return update;
     const id = typeof update.messageId === "string" ? update.messageId : "";
     const newMessage = id !== "" && id !== this.messageId;
-    if (newMessage && isFxSkillWarning(text)) {
+    if (newMessage && isFxContextNotice(text)) {
       const thought = this.thoughtOpen ? `\n\n${text}` : text;
       this.thoughtOpen = true;
       return {

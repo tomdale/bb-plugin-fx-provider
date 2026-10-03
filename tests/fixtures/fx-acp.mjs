@@ -88,6 +88,8 @@ const FX_PERMISSION_OPTIONS = [
 ];
 const FX_SKILL_WARNING =
   'skill discovery warning: candidate "/home/fixture/.claude/skills/broken" was skipped because its metadata is invalid (unsupported_multiline); use one safe name and an optional inline description or a >, >-, or | block, then reload skills; relaunch with FX_TRACE=1 to write a trace log';
+const FX_CONTEXT_NOTICE =
+  '[context] MCP description for "mcp_bb-bridge_AskUserQuestion" truncated: observed=1435 bytes effective=1024 bytes source=compiled default; override with --context-limit mcp_description_bytes=BYTES|off\n';
 let requestSerial = 0;
 
 const sessionUpdate = (update) =>
@@ -184,6 +186,11 @@ async function approvalScenario(text) {
     messageChunk("notice-1", FX_SKILL_WARNING);
     messageChunk("reply-1", "o");
     messageChunk("reply-1", "k");
+    return "end_turn";
+  }
+  if (text.includes("context-notice")) {
+    messageChunk("notice-1", FX_CONTEXT_NOTICE);
+    messageChunk("reply-1", "selected");
     return "end_turn";
   }
   if (text.includes("interjection")) {

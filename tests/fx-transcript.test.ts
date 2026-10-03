@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { FxTranscript, isFxSkillWarning } from "../src/fx-transcript.js";
+import { FxTranscript, isFxContextNotice } from "../src/fx-transcript.js";
 
 // The warning fx 0.0.10 and 0.0.12 sent at the start of every session on a
 // machine with two unparseable Claude skills.
 const SKILL_WARNING =
   'skill discovery warning: candidate "/Users/u/.claude/skills/interactive-shell" was skipped because its metadata is invalid (unsupported_multiline); use one safe name and an optional inline description or a >, >-, or | block, then reload skills; candidate "/Users/u/.claude/skills/tui-development" was skipped because its metadata is invalid (unsupported_multiline); use one safe name and an optional inline description or a >, >-, or | block, then reload skills; relaunch with FX_TRACE=1 to write a trace log';
+
+// The notice fx 0.0.10 sent in BB when it searched BB's AskUserQuestion tool,
+// whose description exceeds fx's default description budget.
+const CONTEXT_NOTICE =
+  '[context] MCP description for "mcp_bb-bridge_AskUserQuestion" truncated: observed=1435 bytes effective=1024 bytes source=compiled default; override with --context-limit mcp_description_bytes=BYTES|off\n';
 
 const chunk = (messageId: string | undefined, text: string) => ({
   sessionUpdate: "agent_message_chunk",
@@ -26,16 +31,42 @@ function replyText(updates: Record<string, unknown>[]) {
     .join("");
 }
 
-describe("fx's skill discovery warning", () => {
-  it("is recognized only in the frame fx writes", () => {
-    expect(isFxSkillWarning(SKILL_WARNING)).toBe(true);
+describe("fx's context notices", () => {
+  it("are recognized only in the frames fx writes", () => {
+    expect(isFxContextNotice(SKILL_WARNING)).toBe(true);
     expect(
-      isFxSkillWarning(
+      isFxContextNotice(
         'skill discovery warning: candidate "x" was skipped; see "/tmp/fx.trace" for details',
       ),
     ).toBe(true);
-    expect(isFxSkillWarning("skill discovery warning: incomplete")).toBe(false);
-    expect(isFxSkillWarning(`Note: ${SKILL_WARNING}`)).toBe(false);
+    expect(isFxContextNotice(CONTEXT_NOTICE)).toBe(true);
+    expect(
+      isFxContextNotice("[context] first warning\n[context]\n[context] second"),
+    ).toBe(true);
+    for (const text of [
+      "skill discovery warning: incomplete",
+      `Note: ${SKILL_WARNING}`,
+      "[context] notice\nfollowed by prose",
+      "[context] ",
+      "[context]",
+      "[contextual] x",
+      "",
+    ]) {
+      expect(isFxContextNotice(text), text).toBe(false);
+    }
+  });
+
+  it("move a context-budget notice out of the reply that follows it", () => {
+    // fx's notice and the model's next sentence arrive under two message
+    // ids with no tool call between them.
+    const output = run([
+      chunk("n1", CONTEXT_NOTICE),
+      chunk("m1", "I found the tool and I'm selecting it now."),
+    ]);
+    expect(output[0]?.sessionUpdate).toBe("agent_thought_chunk");
+    expect(replyText(output)).toBe(
+      "I found the tool and I'm selecting it now.",
+    );
   });
 
   it("moves to the thought channel and leaves the reply intact", () => {

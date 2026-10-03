@@ -365,6 +365,16 @@ describe("transcript", () => {
     );
   });
 
+  it("keeps fx's context-budget notices out of the reply", async () => {
+    const execution = options();
+    const thread = await startThread(execution);
+    const result = await turn(thread, "context-notice", execution);
+    expect(result.text("agentMessage")).toBe("selected");
+    expect(result.text("reasoningText")).toMatch(
+      /^\[context\] MCP description/,
+    );
+  });
+
   it("separates other fx messages from the reply without hiding them", async () => {
     const execution = options();
     const thread = await startThread(execution);
