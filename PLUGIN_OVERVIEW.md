@@ -9,7 +9,7 @@ Choose fx in BB's provider picker to work with its coding agent in your threads.
 
 ## Requirements
 
-Install BB 0.42.1 or newer and the [fx CLI](https://fx.sh/) on each machine where you want to run fx threads. The `fx` executable must be on that machine's `PATH`. Run `fx login` there to authenticate. Model access, usage limits, and any service charges depend on your fx account and model provider.
+Install BB 0.44.0 or newer and the [fx CLI](https://fx.sh/) on each machine where you want to run fx threads. The `fx` executable must be on that machine's `PATH`. Run `fx login` there to authenticate. Model access, usage limits, and any service charges depend on your fx account and model provider.
 
 ## Permissions and limits
 

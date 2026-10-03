@@ -7,7 +7,7 @@ resumable sessions, and streamed replies and tool activity.
 
 ## Requirements
 
-- BB 0.42.1 or newer (plugin SDK 0.4.47).
+- BB 0.44.0 or newer (plugin SDK 0.6.9).
 - The fx CLI available as `fx` on each execution host's `PATH`.
 - An authenticated fx account on that host: run `fx login`, then `fx status --json`.
 - Model access, limits, and service charges depend on your fx account and model provider.
