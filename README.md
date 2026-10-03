@@ -168,9 +168,48 @@ GitHub Actions runs the same checks on pull requests and pushes to `main`.
   the Gateway listing, sign-in and missing-CLI errors, the ACP fallback, and
   each listed effort reaching fx when a thread starts. Catalog fixtures are
   real Gateway entries.
+- Electron runtime tests (`tests/electron-runtime.bridge.test.ts`) run the
+  built bridge the way the desktop app does: on a bb desktop executable in
+  Node mode (`ELECTRON_RUN_AS_NODE=1`), where `process.execPath` is Electron
+  and the host re-runs it for the ACP adapter and the model probe. They check
+  model discovery and a complete turn against the fixture. A guard loaded
+  into every process of the bridge tree turns any Electron launch without
+  Node mode into an immediate exit, so a regression fails the test instead
+  of opening the app. The executable is `BB_ELECTRON_BINARY`, else
+  `/Applications/bb.app` or `/Applications/bb Personal.app`; without one the
+  tests skip (as on the Linux CI runner).
 - `check:managed` builds a temporary copy with `npm install --omit=dev`, checks
   its server/host artifacts, and imports the host export. This catches missing
   production dependencies that a developer build would conceal.
+
+### Manual QA in an isolated bb
+
+`scripts/qa/isolated-bb.sh` runs a private bb server on an installed desktop
+app's runtime with its own data directory and ports, so the plugin can be
+installed and exercised with real fx threads without touching the bb you use
+day to day. The app must host the plugin SDK version that `package.json`
+requires; `start` prints the version it found.
+
+```sh
+npm run build
+BB_APP=/Applications/bb.app SERVER_PORT=41886 scripts/qa/isolated-bb.sh start
+source "${TMPDIR:-/tmp}/bb-plugin-fx-qa/env.sh"
+bb status                      # Data dir must be the QA directory
+bb plugin install . --yes      # after rebuilding: bb plugin reload fx
+bb provider models fx
+bb project create --name fx-qa --root <scratch git repo> --json
+bb thread spawn --project <id> --new-environment worktree --provider fx \
+  --model openai/gpt-5.4-mini --permission-mode accept-edits \
+  --prompt "Reply with exactly: ok" --json
+bb thread wait <thread> --timeout 120 && bb thread log <thread>
+bb thread interactions list <thread>
+scripts/qa/isolated-bb.sh stop
+```
+
+Run every `bb` command in the shell that sourced `env.sh`. Threads that
+share an unmanaged workspace run one at a time, so use
+`--new-environment worktree` for concurrent threads. Real fx threads are
+billed to the signed-in fx account; keep prompts small.
 
 Keep `@get-bb/plugin-sdk` in **dependencies**, pinned to the tested version.
 BB bundles its `provider-bridge/acp` subpath from the plugin's own installation;
