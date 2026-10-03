@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import {
   basename,
   dirname,
@@ -131,10 +131,49 @@ export function isInsideRoot(target: string, root: string): boolean {
 const FX_FILE_EDIT_TOOLS = new Set(["write_file", "edit_file"]);
 
 /**
+ * Whether a path names git metadata through a `.git` segment. The comparison
+ * ignores case because the default macOS and Windows filesystems do, and
+ * `realpath` keeps the case the caller wrote.
+ */
+export function hasGitSegment(path: string): boolean {
+  return path.split(/[\\/]/).some((segment) => segment.toLowerCase() === ".git");
+}
+
+/**
+ * Whether a directory holds a git directory's layout: a repository's `.git`,
+ * a bare repository, or a linked worktree's private git directory.
+ */
+function isGitDirectory(path: string): boolean {
+  return (
+    existsSync(join(path, "HEAD")) &&
+    (existsSync(join(path, "objects")) || existsSync(join(path, "commondir")))
+  );
+}
+
+/**
+ * Whether a physical path lies inside git metadata: below a `.git` segment or
+ * any directory laid out as a git directory, including bare repositories and
+ * the worktree git directories BB grants as write roots.
+ */
+export function isInsideGitMetadata(path: string): boolean {
+  if (hasGitSegment(path)) return true;
+  for (let dir = dirname(path); ; dir = dirname(dir)) {
+    if (isGitDirectory(dir)) return true;
+    if (dirname(dir) === dir) return false;
+  }
+}
+
+/**
  * Whether a permission request is an fx file edit confined to the write
  * roots. Anything else, including edits of an unknown shape, edits outside
  * the roots, and deletes or moves (which fx performs through shell commands),
  * is for BB to decide.
+ *
+ * Git metadata is never in scope, even inside a write root: git runs
+ * commands named in its config (`core.fsmonitor`, hooks), and BB's workspace
+ * watcher runs `git status` on its own, so an approved edit there would run
+ * a command no one approved. fx changes git state through shell commands,
+ * which BB's policy decides.
  */
 export function isFxWorkspaceEdit(
   toolCall: unknown,
@@ -167,9 +206,11 @@ export function isFxWorkspaceEdit(
   }
   const physicalRoots = roots.flatMap((root) => physicalPath(root) ?? []);
   return paths.every((candidate) => {
+    if (hasGitSegment(candidate)) return false;
     const target = fxWriteTarget(candidate, workspace);
     return (
       target !== undefined &&
+      !isInsideGitMetadata(target) &&
       physicalRoots.some((root) => isInsideRoot(target, root))
     );
   });

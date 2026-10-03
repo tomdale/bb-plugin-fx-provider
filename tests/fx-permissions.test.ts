@@ -168,6 +168,63 @@ describe("workspace edits", () => {
   ])("rejects %s", (_, toolCall) => {
     expect(isFxWorkspaceEdit(toolCall, workspace, [workspace])).toBe(false);
   });
+
+  // Git runs commands its metadata names (core.fsmonitor, hooks) and BB's
+  // watcher runs `git status` unprompted, so these edits always go to BB.
+  describe("git metadata", () => {
+    beforeEach(() => {
+      mkdirSync(join(workspace, ".git", "hooks"), { recursive: true });
+      writeFileSync(join(workspace, ".git", "HEAD"), "ref: refs/heads/main\n");
+      mkdirSync(join(workspace, ".git", "objects"));
+    });
+
+    it.each([
+      ".git/config",
+      ".GIT/CONFIG",
+      ".git/hooks/post-checkout",
+      "sub/.git",
+    ])("rejects %s inside the workspace", (path) => {
+      expect(isFxWorkspaceEdit(edit(path), workspace, [workspace])).toBe(false);
+      expect(
+        isFxWorkspaceEdit(edit(join(workspace, path)), workspace, [workspace]),
+      ).toBe(false);
+    });
+
+    it("rejects a worktree's .git pointer file", () => {
+      writeFileSync(join(outside, ".git"), "gitdir: /elsewhere\n");
+      expect(isFxWorkspaceEdit(edit(".git"), outside, [outside])).toBe(false);
+    });
+
+    it("rejects git directories granted as write roots", () => {
+      // A bare common directory and a linked worktree's private git directory,
+      // neither reached through a `.git` segment.
+      const common = join(outside, "repo-cache.git");
+      const linked = join(common, "worktrees", "task");
+      mkdirSync(join(common, "objects"), { recursive: true });
+      mkdirSync(linked, { recursive: true });
+      writeFileSync(join(common, "HEAD"), "ref: refs/heads/main\n");
+      writeFileSync(join(linked, "HEAD"), "ref: refs/heads/task\n");
+      writeFileSync(join(linked, "commondir"), "../..\n");
+      for (const target of [
+        join(common, "config"),
+        join(common, "hooks", "pre-commit"),
+        join(linked, "commondir"),
+      ]) {
+        expect(
+          isFxWorkspaceEdit(edit(target), workspace, [workspace, common, linked]),
+        ).toBe(false);
+      }
+    });
+
+    it("still accepts ordinary files in the repository", () => {
+      expect(isFxWorkspaceEdit(edit("src/app.ts"), workspace, [workspace])).toBe(
+        true,
+      );
+      expect(isFxWorkspaceEdit(edit(".gitignore"), workspace, [workspace])).toBe(
+        true,
+      );
+    });
+  });
 });
 
 describe("BB's tool server", () => {

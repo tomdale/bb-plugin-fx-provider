@@ -172,6 +172,15 @@ describe("permission requests", () => {
       announce({ server: "bb-bridge", tool: "ask_user_question" }),
     );
     expect(adapter.fromAgent(request)).toEqual({ agent: allowOnce });
+
+    // Once fx names servers, a call it did not name is not matched by alias:
+    // another server's tool can share the alias.
+    const unannounced = permission({
+      toolCallId: "call_2",
+      name: "mcp_bb-bridge_ask_user_question",
+      kind: "other",
+    });
+    expect(adapter.fromAgent(unannounced)).toEqual({ bridge: unannounced });
   });
 
   it("leaves requests outside a running prompt to the bridge", () => {

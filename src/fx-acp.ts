@@ -135,6 +135,12 @@ export class FxAcpAdapter {
     string,
     { server: string; tool: string }
   >();
+  /**
+   * Whether this fx names MCP servers on its tool calls. Once it does, a call
+   * without that identity is not matched by its alias, which another
+   * server's tool can share (fx joins server and tool names with `_`).
+   */
+  private sendsMcpIdentity = false;
   private readonly transcript = new FxTranscript();
 
   /** @param editRoots The host's edit grant: extra write roots, or none. */
@@ -223,6 +229,7 @@ export class FxAcpAdapter {
           const identity = fxToolCallMcpIdentity(update);
           if (identity !== undefined && typeof update.toolCallId === "string") {
             this.mcpIdentities.set(update.toolCallId, identity);
+            this.sendsMcpIdentity = true;
           }
         }
         const rewritten = this.transcript.rewrite(update);
@@ -255,7 +262,12 @@ export class FxAcpAdapter {
       const id = toolCall.toolCallId;
       const identity =
         typeof id === "string" ? this.mcpIdentities.get(id) : undefined;
-      if (isBbToolCall(toolCall, this.bbTools, identity)) return allowOnce;
+      if (
+        (identity !== undefined || !this.sendsMcpIdentity) &&
+        isBbToolCall(toolCall, this.bbTools, identity)
+      ) {
+        return allowOnce;
+      }
     }
     if (this.editRoots !== undefined && this.workspace !== undefined) {
       const roots = [this.workspace, ...this.editRoots];
