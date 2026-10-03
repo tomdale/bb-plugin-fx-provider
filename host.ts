@@ -6,6 +6,7 @@ import {
   experimental_acpProviderBridge,
 } from "@get-bb/plugin-sdk/provider-bridge/acp";
 import { runFxAcp } from "./src/fx-acp.js";
+import { fxEditGrantEnv } from "./src/fx-permissions.js";
 
 const adapterFlag = "--fx-acp-adapter";
 const modulePath = fileURLToPath(import.meta.url);
@@ -81,6 +82,9 @@ export const experimental_providerBridge = {
               ...(process.env.ELECTRON_RUN_AS_NODE && {
                 ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE,
               }),
+              // Recomputed for every turn: when the grant changes, the agent
+              // environment changes and the bridge rebuilds the session.
+              ...fxEditGrantEnv(message.params?.options),
             },
           };
           line = JSON.stringify(message);
