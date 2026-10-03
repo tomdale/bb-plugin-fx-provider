@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createGatewayCatalogCache,
   defaultReasoningEffort,
@@ -255,5 +257,76 @@ describe("createGatewayCatalogCache", () => {
       },
     ]);
     expect(await cache.get(url)).toBeNull();
+  });
+
+  it("refuses a response larger than its limit", async () => {
+    const log = vi.fn();
+    const cache = createGatewayCatalogCache({
+      fetch: (async () =>
+        new Response(JSON.stringify(fixture), {
+          status: 200,
+        })) as unknown as typeof globalThis.fetch,
+      maxBytes: 1024,
+      log,
+    });
+    expect(await cache.get(url)).toBeNull();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("exceeds 1024"));
+  });
+
+  // BB stops an idle bridge about a minute after its last request, so the
+  // last good copy has to outlive the process that fetched it.
+  describe("with a store directory", () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "fx-catalog-store-"));
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    function processCache(
+      time: number,
+      fetch: () => Response | Promise<Response>,
+    ) {
+      const fetchMock = vi.fn(async () => fetch());
+      const cache = createGatewayCatalogCache({
+        fetch: fetchMock as unknown as typeof globalThis.fetch,
+        now: () => time,
+        ttlMs: 1000,
+        storeDir: () => dir,
+      });
+      return { cache, fetchMock };
+    }
+
+    it("serves a fresh stored copy without fetching", async () => {
+      const first = processCache(0, ok);
+      const fetched = await first.cache.get(url);
+      const next = processCache(500, () => {
+        throw new Error("unexpected fetch");
+      });
+      const restored = await next.cache.get(url);
+      expect(next.fetchMock).not.toHaveBeenCalled();
+      expect(restored?.stale).toBe(false);
+      expect([...restored!.catalog.keys()]).toEqual([...fetched!.catalog.keys()]);
+    });
+
+    it("falls back to an old stored copy when the Gateway fails", async () => {
+      await processCache(0, ok).cache.get(url);
+      const next = processCache(
+        60_000,
+        () => new Response("down", { status: 503 }),
+      );
+      const restored = await next.cache.get(url);
+      expect(next.fetchMock).toHaveBeenCalledTimes(1);
+      expect(restored?.stale).toBe(true);
+      expect(restored?.catalog.size).toBeGreaterThan(0);
+    });
+
+    it("ignores a stored copy of another URL", async () => {
+      await processCache(0, ok).cache.get(url);
+      const next = processCache(
+        500,
+        () => new Response("down", { status: 503 }),
+      );
+      expect(await next.cache.get("http://127.0.0.1:2/v1/models")).toBeNull();
+    });
   });
 });

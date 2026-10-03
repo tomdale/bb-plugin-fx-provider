@@ -61,7 +61,9 @@ type Answer =
 export function createFxModelDiscovery(modulePath: string, probeFlag: string) {
   const probe = createAcpModelProbe(modulePath, probeFlag);
   const fx = createFxCliRunner({ timeoutMs: FX_QUERY_TIMEOUT_MS });
-  const catalogs = createGatewayCatalogCache({ log });
+  let dataDir: string | undefined;
+  let closed = false;
+  const catalogs = createGatewayCatalogCache({ log, storeDir: () => dataDir });
 
   async function answer(launch: FxLaunch): Promise<Answer> {
     // The catalog fetch runs beside the fx queries; it is cached either way.
@@ -153,7 +155,12 @@ export function createFxModelDiscovery(modulePath: string, probeFlag: string) {
   }
 
   return {
+    /** The bridge's plugin data directory, which keeps the last catalog. */
+    useDataDir(dir: string): void {
+      dataDir = dir;
+    },
     request(line: string, id: string | number): void {
+      if (closed) return;
       let message: unknown;
       try {
         message = JSON.parse(line);
@@ -175,6 +182,8 @@ export function createFxModelDiscovery(modulePath: string, probeFlag: string) {
       }
       answer(launch.data).then(
         (outcome) => {
+          // A query cut short by shutdown settles too; answer nothing then.
+          if (closed) return;
           if (outcome.kind === "probe") {
             log(`using the ACP model probe: ${outcome.reason}`);
             probe.request(line, id);
@@ -187,6 +196,7 @@ export function createFxModelDiscovery(modulePath: string, probeFlag: string) {
           );
         },
         (error: unknown) => {
+          if (closed) return;
           const message =
             error instanceof Error ? error.message : String(error);
           send({ jsonrpc: "2.0", id, error: { code: BRIDGE_ERROR, message } });
@@ -194,6 +204,7 @@ export function createFxModelDiscovery(modulePath: string, probeFlag: string) {
       );
     },
     close(): void {
+      closed = true;
       fx.close();
       probe.close();
     },

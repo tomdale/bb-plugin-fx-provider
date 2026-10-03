@@ -38,7 +38,7 @@ export function fxCliInvocation(
  * The environment the shared bridge gives fx: the bridge's own, minus the
  * variables that only configure the bridge runtime, plus the launch spec's.
  */
-export function fxEnv(
+function fxEnv(
   launchEnv: Readonly<Record<string, string>>,
 ): NodeJS.ProcessEnv {
   const env = { ...process.env };

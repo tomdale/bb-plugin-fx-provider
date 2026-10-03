@@ -1,3 +1,5 @@
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   ModelReasoningEffort,
   ReasoningLevel,
@@ -209,6 +211,14 @@ export interface GatewayCatalogCacheOptions {
   ttlMs?: number;
   /** How long one fetch may take before a cached copy is used instead. */
   timeoutMs?: number;
+  /** The largest response accepted; the real catalog is about 0.5 MB. */
+  maxBytes?: number;
+  /**
+   * The directory that keeps the last good catalog, once known. BB stops an
+   * idle bridge about a minute after its last request, so most refreshes
+   * start in a fresh process; the copy on disk survives that.
+   */
+  storeDir?: () => string | undefined;
   log?: (message: string) => void;
 }
 
@@ -225,12 +235,15 @@ export interface GatewayCatalogLookup {
  */
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_FETCH_TIMEOUT_MS = 5000;
+const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
+const STORE_FILE = "gateway-catalog.json";
 
 /**
- * An in-memory cache of the public Gateway catalog, one entry per URL.
- * Concurrent lookups share one fetch. A failed fetch falls back to the last
- * good copy, however old, so a Gateway outage does not strip names and
- * efforts from the picker; `null` means no copy was ever fetched.
+ * A cache of the public Gateway catalog, one entry per URL, kept in memory
+ * and, when a store directory is known, on disk. Concurrent lookups share one
+ * fetch. A failed fetch falls back to the last good copy, however old, so a
+ * Gateway outage does not strip names and efforts from the picker; `null`
+ * means no copy was ever fetched.
  */
 export function createGatewayCatalogCache(
   options: GatewayCatalogCacheOptions = {},
@@ -239,6 +252,7 @@ export function createGatewayCatalogCache(
   const now = options.now ?? Date.now;
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const log = options.log ?? (() => {});
   const entries = new Map<
     string,
@@ -253,9 +267,12 @@ export function createGatewayCatalogCache(
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const catalog = parseGatewayCatalog(await response.json());
+      const body: unknown = JSON.parse(await readBody(response, maxBytes));
+      const catalog = parseGatewayCatalog(body);
       if (catalog === null) throw new Error("the response has no data array");
-      entries.set(url, { catalog, fetchedAt: now() });
+      const fetchedAt = now();
+      entries.set(url, { catalog, fetchedAt });
+      store(url, fetchedAt, body);
       return catalog;
     } catch (error) {
       log(`cannot fetch the Gateway catalog from ${url}: ${describe(error)}`);
@@ -263,8 +280,47 @@ export function createGatewayCatalogCache(
     }
   }
 
+  function storePath(): string | undefined {
+    const dir = options.storeDir?.();
+    return dir === undefined ? undefined : join(dir, STORE_FILE);
+  }
+
+  function store(url: string, fetchedAt: number, body: unknown): void {
+    const path = storePath();
+    if (path === undefined) return;
+    try {
+      mkdirSync(join(path, ".."), { recursive: true });
+      const temp = `${path}.${process.pid}.tmp`;
+      writeFileSync(temp, JSON.stringify({ url, fetchedAt, body }));
+      renameSync(temp, path);
+    } catch (error) {
+      log(`cannot save the Gateway catalog: ${describe(error)}`);
+    }
+  }
+
+  /** The stored copy for `url`, read once per process. */
+  function restore(url: string): void {
+    const path = storePath();
+    if (path === undefined || entries.has(url)) return;
+    try {
+      const saved = JSON.parse(readFileSync(path, "utf8")) as {
+        url?: unknown;
+        fetchedAt?: unknown;
+        body?: unknown;
+      };
+      if (saved.url !== url || typeof saved.fetchedAt !== "number") return;
+      const catalog = parseGatewayCatalog(saved.body);
+      if (catalog !== null) {
+        entries.set(url, { catalog, fetchedAt: saved.fetchedAt });
+      }
+    } catch {
+      // No usable copy: the next fetch decides.
+    }
+  }
+
   return {
     async get(url: string): Promise<GatewayCatalogLookup | null> {
+      restore(url);
       const cached = entries.get(url);
       if (cached && now() - cached.fetchedAt < ttlMs) {
         return { catalog: cached.catalog, stale: false };
@@ -280,6 +336,29 @@ export function createGatewayCatalogCache(
       return fallback ? { catalog: fallback.catalog, stale: true } : null;
     },
   };
+}
+
+/** The response body as text, refusing more than `maxBytes`. */
+async function readBody(response: Response, maxBytes: number): Promise<string> {
+  const declared = Number(response.headers.get("content-length"));
+  if (declared > maxBytes) {
+    throw new Error(`the response exceeds ${maxBytes} bytes`);
+  }
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      throw new Error(`the response exceeds ${maxBytes} bytes`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function describe(error: unknown): string {
