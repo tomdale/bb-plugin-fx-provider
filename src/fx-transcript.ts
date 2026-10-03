@@ -74,6 +74,8 @@ export class FxTranscript {
   private messageOpen = false;
   private messageNewlines = 0;
   private thoughtOpen = false;
+  /** The id of a context notice just moved to the thought stream. */
+  private noticeId: string | undefined;
 
   /** A prompt starts with no open items. */
   reset(): void {
@@ -81,6 +83,7 @@ export class FxTranscript {
     this.messageOpen = false;
     this.messageNewlines = 0;
     this.thoughtOpen = false;
+    this.noticeId = undefined;
   }
 
   /** Returns the update to forward: the same object when nothing changes. */
@@ -108,13 +111,24 @@ export class FxTranscript {
     if (newMessage && isFxContextNotice(text)) {
       const thought = this.thoughtOpen ? `\n\n${text}` : text;
       this.thoughtOpen = true;
+      this.noticeId = id;
       return {
         ...withText(update, thought),
         sessionUpdate: "agent_thought_chunk",
       };
     }
+    // fx switches message ids between operational and assistant text, so a
+    // new id right after a moved notice is the reply resuming, not an
+    // interjection; more operational text keeps the notice's id.
+    const resumesReply = this.noticeId !== undefined && id !== this.noticeId;
+    this.noticeId = undefined;
     let output = text;
-    if (newMessage && this.messageOpen && this.messageId !== undefined) {
+    if (
+      newMessage &&
+      this.messageOpen &&
+      this.messageId !== undefined &&
+      !resumesReply
+    ) {
       const gap = Math.max(0, 2 - this.messageNewlines - leadingNewlines(text));
       output = "\n".repeat(gap) + text;
     }

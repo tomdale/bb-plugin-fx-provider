@@ -25,7 +25,10 @@ function launchBridge(cwd: string) {
   });
   const child = spawn(launch.command, launch.args, {
     cwd: launch.cwd,
-    env: { ...process.env, ...launch.env },
+    // The desktop daemon runs bridges with ELECTRON_RUN_AS_NODE=1, which the
+    // host forwards to the adapter; setting it here (plain Node ignores it)
+    // lets the env test prove the adapter keeps it away from fx.
+    env: { ...process.env, ...launch.env, ELECTRON_RUN_AS_NODE: "1" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const messages: BridgeJsonRpcOutputMessage[] = [];

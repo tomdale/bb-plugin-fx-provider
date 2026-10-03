@@ -91,6 +91,26 @@ describe("fx's context notices", () => {
     expect(replyText(output)).toBe(`Quoting fx: ${SKILL_WARNING}`);
   });
 
+  it("lets the reply resume mid-sentence after a notice moves out of it", () => {
+    // fx gives operational text and the resumed reply different message ids.
+    const output = run([
+      chunk("a1", "The answer is"),
+      chunk("n1", CONTEXT_NOTICE),
+      chunk("a2", " 42."),
+    ]);
+    expect(output[1]?.sessionUpdate).toBe("agent_thought_chunk");
+    expect(replyText(output)).toBe("The answer is 42.");
+  });
+
+  it("keeps operational text after a moved notice in its own paragraph", () => {
+    const output = run([
+      chunk("a1", "Working on it."),
+      chunk("n1", CONTEXT_NOTICE),
+      chunk("n1", "HTTP 429: rate limited"),
+    ]);
+    expect(replyText(output)).toBe("Working on it.\n\nHTTP 429: rate limited");
+  });
+
   it("does not take later notices under the same message id with it", () => {
     // fx keeps one message id across consecutive operational emissions.
     const output = run([

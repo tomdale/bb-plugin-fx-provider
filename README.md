@@ -60,15 +60,18 @@ The plugin ships no frontend bundle.
 
 ### Models and reasoning effort
 
-`host.ts` answers BB's model-list request itself. For a Vercel AI Gateway
-account it runs `fx models --json` (the ids the account can select) and
-`fx status --json` (the configured model and sign-in state) with the launch
-spec's command and environment, and reads the public Gateway catalog
+`host.ts` answers BB's model-list request itself. It runs `fx models --json`
+(the ids the account can select) and `fx status --json` (the configured model
+and sign-in state) with the launch spec's command and environment, and at the
+same time reads the public Gateway catalog
 (`https://ai-gateway.vercel.sh/v1/models`, or fx's loopback
-`FX_GATEWAY_BASE_URL`) at the same time. No fx session is created. The catalog
-is cached in memory for ten minutes, and its last good copy is reused while the
-Gateway is unreachable. BB itself refreshes the list every ten minutes per
-machine.
+`FX_GATEWAY_BASE_URL`) without authentication. For a Vercel AI Gateway account
+the answer is built from these three sources and no fx session is created. The
+catalog is cached for ten minutes in memory and in the plugin's bridge data
+directory (`gateway-catalog.json`), which outlives the short-lived bridge
+process BB uses for model lists; the last good copy is reused while the
+Gateway is unreachable, and responses over 8 MiB are refused. BB itself
+refreshes the list every ten minutes per machine.
 
 Each model gets its Gateway name, its vendor as the picker's qualifier, a short
 description (context window and capabilities), and the efforts fx offers for
@@ -95,16 +98,25 @@ leaves one empty fx session behind.
 
 The launch spec pins `FX_PERMISSION_MODE=ask`, overriding an inherited `auto`
 or `yolo` mode, so fx sends a `session/request_permission` request for each
-sensitive tool call. The requests are decided as follows:
+sensitive tool call. host.ts also drops `FX_PERMISSION_MODE` and the adapter's
+grant variable from the thread environment BB adds to every request (shell,
+machine settings, other plugins), which would otherwise take precedence. The
+requests are decided as follows:
 
 - **Workspace edits.** The adapter approves fx `write_file` and `edit_file`
   calls whose target lies inside the thread's workspace or BB's additional
-  write roots (for a worktree, the git directories its commits write to; BB's
-  thread storage). Relative paths resolve against the workspace and symlinks are
-  followed, as fx does. BB's permission modes all approve such edits, so the
-  adapter approves them in every mode. An edit outside the roots, a path the
-  adapter cannot resolve with certainty (`..` segments, `~`, a dangling
-  symlink), and edits of any other shape go to the bridge.
+  write roots (such as BB's thread storage). Relative paths resolve against the
+  workspace and symlinks are followed, as fx does. BB's permission modes all
+  approve such edits, so the adapter approves them in every mode. An edit
+  outside the roots, a path the adapter cannot resolve with certainty (`..`
+  segments, `~`, a dangling symlink), and edits of any other shape go to the
+  bridge.
+- **Git metadata** is never approved by the adapter, even inside a write root:
+  any path with a `.git` segment (in any case) or inside a git directory,
+  including the worktree git directories BB grants as write roots. Git runs
+  commands its config and hooks name, and BB's workspace watcher runs
+  `git status` unprompted, so such an edit could run a command no one
+  approved. These requests go to the bridge like any other.
 - **BB's own tools.** The adapter approves calls to the tools BB serves to fx
   through the bridge's MCP server, in every mode; BB authorizes those itself.
 - **Everything else**, including shell commands (fx deletes and moves files
@@ -127,8 +139,11 @@ and tool admission can decide a call before fx asks BB.
 
 The plugin does not set fx's `mode` session option. It passes model selection
 and any advertised reasoning-effort choices through the bridge. The fx CLI
-owns credentials and service connections; the plugin stores no credentials of
-its own and adds no telemetry.
+owns credentials and model-provider connections; the plugin stores no
+credentials of its own and adds no telemetry. Its one network request of its
+own is the unauthenticated read of the public Gateway model catalog described
+under [Models and reasoning effort](#models-and-reasoning-effort), made for
+every fx account, whichever provider it uses.
 
 ### Supported scope
 
@@ -216,6 +231,12 @@ BB bundles its `provider-bridge/acp` subpath from the plugin's own installation;
 managed Git installs omit development dependencies. `zod` is also needed by
 that bridge. The general `bb plugin types --check` advice to move the SDK to
 devDependencies does not apply to provider bridges.
+
+The pinned SDK and `engines.bbPluginSdk` follow the plugin SDK of the oldest
+supported BB: BB marks a plugin incompatible when its own SDK is older than the
+plugin requires, and stock BB 0.44.0 hosts SDK 0.6.5. The pin hint that
+`bb plugin build` prints names the SDK of the BB running the build; raise the
+pin only together with the minimum BB version.
 
 `PLUGIN_OVERVIEW.md` contains the marketplace description. Publish a new
 immutable `vX.Y.Z` tag for each validated release. Update the marketplace range

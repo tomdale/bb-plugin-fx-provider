@@ -142,7 +142,7 @@ status)
   ;;
 env) env_lines ;;
 *)
-  sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac
