@@ -49,6 +49,8 @@ adjusts fx's ACP traffic before the bridge reads it:
   retaining the agent's text.
 - It answers the permission requests BB's policy already decides (see
   [Permissions](#permissions)).
+- It unwraps fx's MCP result envelopes so tool details show the returned
+  content. MCP content blocks and error metadata are preserved in the result.
 - It keeps fx's operational text out of the reply. fx sends its notices as
   message text under a message id of their own, and the shared bridge would
   stream them into the reply. fx's context notices (the skill discovery

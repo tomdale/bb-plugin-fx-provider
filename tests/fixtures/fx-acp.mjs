@@ -145,6 +145,31 @@ function bbToolAlias(tool) {
 /** Prompt-driven approval and transcript scenarios. Returns the stop reason. */
 async function approvalScenario(text) {
   let match;
+  if (text.includes("mcp-result-display")) {
+    const toolCallId = `call_${randomUUID()}`;
+    sessionUpdate({
+      sessionUpdate: "tool_call",
+      toolCallId,
+      name: "mcp_bb-bridge_todo",
+      title: "mcp_bb-bridge_todo",
+      kind: "other",
+      status: "pending",
+      rawInput: { action: "list" },
+    });
+    const rawOutput = JSON.stringify({
+      server: "bb-bridge",
+      tool: "mcp_bb-bridge_todo",
+      result: { content: [{ type: "text", text: "First task\nSecond task" }] },
+    });
+    sessionUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      status: "completed",
+      rawOutput,
+      content: [{ type: "content", content: { type: "text", text: rawOutput } }],
+    });
+    return "end_turn";
+  }
   if ((match = /\bedit-permission (\S+)/.exec(text))) {
     const outcome = await requestToolPermission({
       name: "write_file",

@@ -12,6 +12,7 @@ import {
   type FxBbToolServer,
 } from "./fx-permissions.js";
 import { FxTranscript } from "./fx-transcript.js";
+import { normalizeFxToolResult } from "./fx-tool-results.js";
 
 /**
  * fx returns both `provider` and `model` with category `model`, provider first.
@@ -75,6 +76,7 @@ const INSPECTED_UPDATES = new Set([
   "agent_message_chunk",
   "agent_thought_chunk",
   "tool_call",
+  "tool_call_update",
 ]);
 
 /**
@@ -232,7 +234,7 @@ export class FxAcpAdapter {
             this.sendsMcpIdentity = true;
           }
         }
-        const rewritten = this.transcript.rewrite(update);
+        const rewritten = normalizeFxToolResult(this.transcript.rewrite(update));
         if (rewritten !== update) {
           params.update = rewritten;
           changed = true;

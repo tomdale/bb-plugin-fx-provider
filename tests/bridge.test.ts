@@ -166,6 +166,34 @@ it("passes the SDK's canonical bridge conformance suite", async () => {
   }
 }, 30_000);
 
+it("displays MCP content through the bundled bridge without its fx envelope", async () => {
+  const started = (await bridge.request("thread/start", {
+    threadId: "fx-results",
+    cwd,
+    instructionMode: "append",
+    options: options(),
+  })) as { providerThreadId: string };
+  await bridge.request("turn/start", {
+    threadId: "fx-results",
+    providerThreadId: started.providerThreadId,
+    clientRequestId: "creq_abcdefghjk",
+    options: options(),
+    input: [{ type: "text", text: "mcp-result-display", mentions: [] }],
+  });
+  const completed = await bridge.waitFor((message) =>
+    message.method === "thread/delta" &&
+    (message.params as { deltas?: { kind?: string }[] })?.deltas?.some(
+      (delta) => delta.kind === "item.close",
+    ) === true,
+  );
+  const deltas = (completed.params as { deltas: { kind: string }[] }).deltas;
+  expect(deltas.find((delta) => delta.kind === "item.close")).toMatchObject({
+    status: "completed",
+    resultText: "First task\nSecond task",
+    item: { result: { content: [{ type: "text", text: "First task\nSecond task" }] } },
+  });
+});
+
 it("discovers the account default from ACP session configuration", async () => {
   const result = await bridge.request("model/list", { cwd, providerOptions });
   expect(result).toMatchObject({
